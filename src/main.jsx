@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 
 const makeIcon = (glyph) => ({ size = 16 }) => <span aria-hidden="true" style={{fontSize:size, lineHeight:1, display:'inline-grid', placeItems:'center', width:size, height:size}}>{glyph}</span>;
-const ArrowRight=makeIcon('→'), Check=makeIcon('✓'), ChevronDown=makeIcon('⌄'), Download=makeIcon('↓'), FileJson=makeIcon('{ }'), GitBranch=makeIcon('⑂'), MessageSquareReply=makeIcon('↩'), MoreHorizontal=makeIcon('•••'), Plus=makeIcon('+'), Save=makeIcon('◇'), Sparkles=makeIcon('✦'), Trash2=makeIcon('×'), Upload=makeIcon('↑'), X=makeIcon('×');
+const ArrowLeft=makeIcon('←'), ArrowRight=makeIcon('→'), Check=makeIcon('✓'), ChevronDown=makeIcon('⌄'), Download=makeIcon('↓'), FileJson=makeIcon('{ }'), GitBranch=makeIcon('⑂'), MessageSquareReply=makeIcon('↩'), MoreHorizontal=makeIcon('•••'), Plus=makeIcon('+'), Save=makeIcon('◇'), Sparkles=makeIcon('✦'), Trash2=makeIcon('×'), Upload=makeIcon('↑'), X=makeIcon('×');
 
 const STORAGE_KEY = 'apo-talk-tree:v1';
 const sample = {
@@ -47,6 +47,17 @@ function removeNode(root, id) {
     )
   };
 }
+function insertBeforeNode(root, id, newNode) {
+  if (root.id === id) return { ...newNode, children: [root] };
+  return {
+    ...root,
+    children: (root.children || []).map((child) =>
+      child.id === id
+        ? { ...newNode, children: [child] }
+        : insertBeforeNode(child, id, newNode)
+    )
+  };
+}
 function countNodes(root) { let count = 0; walk(root, () => count++); return count; }
 
 function App() {
@@ -78,6 +89,11 @@ function App() {
       children: [{ ...next, children: node.children || [] }]
     }));
     commit({ ...data, root }); setSelectedId(next.id);
+  };
+  const insertPrevious = (nodeId) => {
+    const previous = { id: uid(), type: 'talk', label: '前のトーク', text: '', children: [] };
+    const root = insertBeforeNode(data.root, nodeId, previous);
+    commit({ ...data, root }); setSelectedId(previous.id);
   };
   const patchSelected = (patch) => commit({ ...data, root: updateNode(data.root, selectedId, (n) => ({ ...n, ...patch })) });
   const deleteNode = (nodeId) => {
@@ -130,7 +146,7 @@ function App() {
 
       <section className="workspace">
         <div className="canvas-head"><div><span className="status-dot"></span>自動保存中</div><div className="stats"><span>{stats.nodes} ノード</span><span>{stats.branches} 接続</span></div></div>
-        <div className="canvas"><TreeNode node={data.root} rootId={data.root.id} selectedId={selectedId} onSelect={setSelectedId} onAdd={addChild} onInsert={insertNext} onDelete={deleteNode}/></div>
+        <div className="canvas"><TreeNode node={data.root} rootId={data.root.id} selectedId={selectedId} onSelect={setSelectedId} onAdd={addChild} onInsertBefore={insertPrevious} onInsert={insertNext} onDelete={deleteNode}/></div>
       </section>
 
       <aside className={`editor ${selected ? 'open' : ''}`}>
@@ -140,7 +156,7 @@ function App() {
           <label>ラベル<input value={selected.label} onChange={(e) => patchSelected({ label: e.target.value })}/></label>
           <label>トーク内容<textarea rows="7" value={selected.text} placeholder="ここに話す内容を入力…" onChange={(e) => patchSelected({ text: e.target.value })}/></label>
           <div className="quick-add"><p>この後の分岐を追加</p><div><button onClick={() => addChild(selected.id, 'reaction')}><MessageSquareReply size={16}/>相手の反応</button><button onClick={() => addChild(selected.id, 'objection')}><GitBranch size={16}/>断り文句</button><button onClick={() => addChild(selected.id, 'reply')}><ArrowRight size={16}/>切り返し</button></div></div>
-          <button className="insert-next" onClick={() => insertNext(selected.id)}><Plus size={16}/>ノードを1つ後ろに追加</button>
+          <div className="insert-actions"><button className="insert-next previous" onClick={() => insertPrevious(selected.id)}><ArrowLeft size={16}/>ノードを1つ前に追加</button><button className="insert-next" onClick={() => insertNext(selected.id)}>ノードを1つ後ろに追加<ArrowRight size={16}/></button></div>
           {selected.id !== data.root.id && <button className="danger" onClick={() => deleteNode(selected.id)}><Trash2 size={16}/>このノードを削除</button>}
         </div>}
       </aside>
@@ -151,18 +167,19 @@ function App() {
   </div>;
 }
 
-function TreeNode({ node, rootId, selectedId, onSelect, onAdd, onInsert, onDelete }) {
+function TreeNode({ node, rootId, selectedId, onSelect, onAdd, onInsertBefore, onInsert, onDelete }) {
   return <div className="tree-row">
     <div className={`node-card ${node.type} ${selectedId === node.id ? 'selected' : ''}`} onClick={() => onSelect(node.id)}>
       <div className="node-top"><span>{typeLabel[node.type]}</span><MoreHorizontal size={17}/></div>
       <b>{node.label || 'ラベルなし'}</b><p>{node.text || 'トーク内容を入力してください'}</p>
       <div className="node-actions">
+        <button className="node-add previous" onClick={(e) => { e.stopPropagation(); onInsertBefore(node.id); }}><ArrowLeft size={15}/>前に追加</button>
         <button className="node-add next" onClick={(e) => { e.stopPropagation(); onInsert(node.id); }}><ArrowRight size={15}/>後ろに追加</button>
         <button className="node-add" onClick={(e) => { e.stopPropagation(); onAdd(node.id, node.type === 'objection' ? 'reply' : 'reaction'); }}><GitBranch size={15}/>分岐を追加</button>
         {node.id !== rootId && <button className="node-delete" title="ノードを削除" aria-label="ノードを削除" onClick={(e) => { e.stopPropagation(); onDelete(node.id); }}><Trash2 size={16}/></button>}
       </div>
     </div>
-    {node.children?.length > 0 && <div className="children">{node.children.map((child) => <TreeNode key={child.id} node={child} rootId={rootId} selectedId={selectedId} onSelect={onSelect} onAdd={onAdd} onInsert={onInsert} onDelete={onDelete}/>)}</div>}
+    {node.children?.length > 0 && <div className="children">{node.children.map((child) => <TreeNode key={child.id} node={child} rootId={rootId} selectedId={selectedId} onSelect={onSelect} onAdd={onAdd} onInsertBefore={onInsertBefore} onInsert={onInsert} onDelete={onDelete}/>)}</div>}
   </div>;
 }
 
