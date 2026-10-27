@@ -40,7 +40,12 @@ function updateNode(root, id, updater) {
   return { ...root, children: (root.children || []).map((child) => updateNode(child, id, updater)) };
 }
 function removeNode(root, id) {
-  return { ...root, children: (root.children || []).filter((c) => c.id !== id).map((c) => removeNode(c, id)) };
+  return {
+    ...root,
+    children: (root.children || []).flatMap((child) =>
+      child.id === id ? (child.children || []) : [removeNode(child, id)]
+    )
+  };
 }
 function countNodes(root) { let count = 0; walk(root, () => count++); return count; }
 
@@ -66,10 +71,20 @@ function App() {
     const root = updateNode(data.root, parentId, (n) => ({ ...n, children: [...(n.children || []), child] }));
     commit({ ...data, root }); setSelectedId(child.id);
   };
+  const insertNext = (nodeId) => {
+    const next = { id: uid(), type: 'talk', label: '次のトーク', text: '', children: [] };
+    const root = updateNode(data.root, nodeId, (node) => ({
+      ...node,
+      children: [{ ...next, children: node.children || [] }]
+    }));
+    commit({ ...data, root }); setSelectedId(next.id);
+  };
   const patchSelected = (patch) => commit({ ...data, root: updateNode(data.root, selectedId, (n) => ({ ...n, ...patch })) });
-  const deleteSelected = () => {
-    if (selectedId === data.root.id) return;
-    commit({ ...data, root: removeNode(data.root, selectedId) }); setSelectedId(data.root.id);
+  const deleteNode = (nodeId) => {
+    if (nodeId === data.root.id) return;
+    if (!window.confirm('このノードを削除しますか？ 後ろのノードは前のノードにつなぎ直されます。')) return;
+    commit({ ...data, root: removeNode(data.root, nodeId) });
+    if (selectedId === nodeId) setSelectedId(data.root.id);
   };
   const createFromSource = () => {
     const lines = sourceText.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -115,7 +130,7 @@ function App() {
 
       <section className="workspace">
         <div className="canvas-head"><div><span className="status-dot"></span>自動保存中</div><div className="stats"><span>{stats.nodes} ノード</span><span>{stats.branches} 接続</span></div></div>
-        <div className="canvas"><TreeNode node={data.root} selectedId={selectedId} onSelect={setSelectedId} onAdd={addChild}/></div>
+        <div className="canvas"><TreeNode node={data.root} rootId={data.root.id} selectedId={selectedId} onSelect={setSelectedId} onAdd={addChild} onInsert={insertNext} onDelete={deleteNode}/></div>
       </section>
 
       <aside className={`editor ${selected ? 'open' : ''}`}>
@@ -125,7 +140,8 @@ function App() {
           <label>ラベル<input value={selected.label} onChange={(e) => patchSelected({ label: e.target.value })}/></label>
           <label>トーク内容<textarea rows="7" value={selected.text} placeholder="ここに話す内容を入力…" onChange={(e) => patchSelected({ text: e.target.value })}/></label>
           <div className="quick-add"><p>この後の分岐を追加</p><div><button onClick={() => addChild(selected.id, 'reaction')}><MessageSquareReply size={16}/>相手の反応</button><button onClick={() => addChild(selected.id, 'objection')}><GitBranch size={16}/>断り文句</button><button onClick={() => addChild(selected.id, 'reply')}><ArrowRight size={16}/>切り返し</button></div></div>
-          {selected.id !== data.root.id && <button className="danger" onClick={deleteSelected}><Trash2 size={16}/>このノードを削除</button>}
+          <button className="insert-next" onClick={() => insertNext(selected.id)}><Plus size={16}/>ノードを1つ後ろに追加</button>
+          {selected.id !== data.root.id && <button className="danger" onClick={() => deleteNode(selected.id)}><Trash2 size={16}/>このノードを削除</button>}
         </div>}
       </aside>
     </main>
@@ -135,14 +151,18 @@ function App() {
   </div>;
 }
 
-function TreeNode({ node, selectedId, onSelect, onAdd }) {
+function TreeNode({ node, rootId, selectedId, onSelect, onAdd, onInsert, onDelete }) {
   return <div className="tree-row">
     <div className={`node-card ${node.type} ${selectedId === node.id ? 'selected' : ''}`} onClick={() => onSelect(node.id)}>
       <div className="node-top"><span>{typeLabel[node.type]}</span><MoreHorizontal size={17}/></div>
       <b>{node.label || 'ラベルなし'}</b><p>{node.text || 'トーク内容を入力してください'}</p>
-      <button className="node-add" onClick={(e) => { e.stopPropagation(); onAdd(node.id, node.type === 'objection' ? 'reply' : 'reaction'); }}><Plus size={15}/>分岐を追加</button>
+      <div className="node-actions">
+        <button className="node-add next" onClick={(e) => { e.stopPropagation(); onInsert(node.id); }}><ArrowRight size={15}/>後ろに追加</button>
+        <button className="node-add" onClick={(e) => { e.stopPropagation(); onAdd(node.id, node.type === 'objection' ? 'reply' : 'reaction'); }}><GitBranch size={15}/>分岐を追加</button>
+        {node.id !== rootId && <button className="node-delete" title="ノードを削除" aria-label="ノードを削除" onClick={(e) => { e.stopPropagation(); onDelete(node.id); }}><Trash2 size={16}/></button>}
+      </div>
     </div>
-    {node.children?.length > 0 && <div className="children">{node.children.map((child) => <TreeNode key={child.id} node={child} selectedId={selectedId} onSelect={onSelect} onAdd={onAdd}/>)}</div>}
+    {node.children?.length > 0 && <div className="children">{node.children.map((child) => <TreeNode key={child.id} node={child} rootId={rootId} selectedId={selectedId} onSelect={onSelect} onAdd={onAdd} onInsert={onInsert} onDelete={onDelete}/>)}</div>}
   </div>;
 }
 
